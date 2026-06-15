@@ -128,10 +128,14 @@
     <div class="brand">
       <span class="eyebrow">券商月度資料</span>
       <h1>券商部位看板</h1>
-      <span class="sub">庫存與交易量趨勢・排名・市佔一覽</span>
+      <span class="sub">ELN／PGN・庫存與交易量趨勢・排名・市佔一覽</span>
     </div>
     <div class="toolbar">
       <span style="font-size:12px;font-weight:600;color:var(--navy);background:var(--navy-soft);padding:6px 12px;border-radius:999px;">單位：億元</span>
+      <div class="seg" id="productSeg">
+        <button data-pd="ELN" class="on">ELN</button>
+        <button data-pd="PGN">PGN</button>
+      </div>
       <div class="seg" id="datasetSeg">
         <button data-ds="inventory" class="on">庫存</button>
         <button data-ds="volume">交易量</button>
@@ -171,6 +175,10 @@
     <h2>更新資料</h2>
     <p class="hint">直接從 Excel 複製整塊表格（含標題列）貼上即可。第一列是月份代碼、第一欄是券商名稱。空白或 ⚠️ 會視為無資料。</p>
     <div class="radio-row">
+      <label><input type="radio" name="pdkind" value="ELN" checked>ELN</label>
+      <label><input type="radio" name="pdkind" value="PGN">PGN</label>
+    </div>
+    <div class="radio-row">
       <label><input type="radio" name="dskind" value="inventory" checked>更新「庫存」</label>
       <label><input type="radio" name="dskind" value="volume">更新「交易量」</label>
     </div>
@@ -190,12 +198,15 @@
 <script>
 /* ===== 設定區：把你的 Google 試算表「發布到網路」的 CSV 連結貼到這裡 =====
    作法：Google 試算表 → 檔案 → 共用 → 發布到網路 → 選分頁 + 格式選「逗號分隔值 (.csv)」→ 發布，複製連結。
-   庫存與交易量各是一個分頁，各複製一條連結貼到下面對應的位置；沒有的那項留空字串 "" 即可。
-   試算表版面要跟原本表格一樣：第一列是月份代碼(2501...)、第一欄是券商名稱。 */
+   每個商品(ELN/PGN)各有庫存、交易量兩個分頁，總共四條連結；沒有的那項留空字串 "" 即可。
+   試算表版面要跟原本表格一樣：第一列是月份代碼(2501...)、第一欄是券商名稱。
+   要再加新商品別，就在 products 裡照樣多加一組即可。 */
 const SHEET_CONFIG = {
-  inventoryCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQnQF1Y8vIwMLbx9nrV-gi775X7sH5l9A1xGHZlx7CpEKuxY6LxisfnYz38i71XBhC3o6EPMO_PW1sx/pub?gid=0&single=true&output=csv",        // 庫存分頁的 CSV 連結
-  volumeCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQnQF1Y8vIwMLbx9nrV-gi775X7sH5l9A1xGHZlx7CpEKuxY6LxisfnYz38i71XBhC3o6EPMO_PW1sx/pub?gid=1646967370&single=true&output=csv",           // 交易量分頁的 CSV 連結
-  valuesAreThousands: true    // 試算表數字是千元就維持 true，會自動換算成億元
+  valuesAreThousands: true,     // 試算表數字是千元就維持 true，會自動換算成億元
+  products: {
+    ELN: { inventoryCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQnQF1Y8vIwMLbx9nrV-gi775X7sH5l9A1xGHZlx7CpEKuxY6LxisfnYz38i71XBhC3o6EPMO_PW1sx/pub?gid=0&single=true&output=csv", volumeCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQnQF1Y8vIwMLbx9nrV-gi775X7sH5l9A1xGHZlx7CpEKuxY6LxisfnYz38i71XBhC3o6EPMO_PW1sx/pub?gid=1646967370&single=true&output=csv" },
+    PGN: { inventoryCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQnQF1Y8vIwMLbx9nrV-gi775X7sH5l9A1xGHZlx7CpEKuxY6LxisfnYz38i71XBhC3o6EPMO_PW1sx/pub?gid=954805594&single=true&output=csv", volumeCsvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQnQF1Y8vIwMLbx9nrV-gi775X7sH5l9A1xGHZlx7CpEKuxY6LxisfnYz38i71XBhC3o6EPMO_PW1sx/pub?gid=407124453&single=true&output=csv" }
+  }
 };
 
 const PALETTE = ['#2A6FB0','#E08A1E','#5B8C2A','#9B5DE5','#D23B3B','#1B998B','#8A6D3B','#C04CB0','#1F3A93','#7A7D85','#C8772B','#0E7C66','#A23E48'];
@@ -217,17 +228,27 @@ const DEFAULT_INVENTORY = {
   ]
 };
 
-const STORE_KEY = 'brokerDash_v1';
+const STORE_KEY = 'brokerDash_v2';
 const K2YI = 100000;
-let DATA = { inventory: clone(DEFAULT_INVENTORY), volume: {months:[],brokers:[]} };
+function emptyDs(){ return {months:[],brokers:[]}; }
+function emptyProduct(){ return {inventory:emptyDs(), volume:emptyDs()}; }
+let DATA = {
+  ELN: { inventory: clone(DEFAULT_INVENTORY), volume: emptyDs() },
+  PGN: { inventory: emptyDs(), volume: emptyDs() }
+};
 let colorMap = {};
-let state = { ds:'inventory', view:'trend', month:null, log:false, hidden:new Set() };
+let state = { product:'ELN', ds:'inventory', view:'trend', month:null, log:false, hidden:new Set() };
 let chart = null;
 
 function clone(o){ return JSON.parse(JSON.stringify(o)); }
-function load(){ try{ const s=localStorage.getItem(STORE_KEY); if(s){ DATA=JSON.parse(s);} }catch(e){} }
+function migrate(obj){ if(obj && obj.inventory && !obj.ELN){ return {ELN:obj, PGN:emptyProduct()}; } return obj; }
+function load(){
+  try{ let s=localStorage.getItem(STORE_KEY); if(s){ DATA=JSON.parse(s); return; }
+    s=localStorage.getItem('brokerDash_v1'); if(s){ DATA=migrate(JSON.parse(s)); }
+  }catch(e){}
+}
 function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(DATA)); }catch(e){} }
-function cur(){ return DATA[state.ds]; }
+function cur(){ return (DATA[state.product]||emptyProduct())[state.ds]; }
 function fmtMonth(c){ if(!c) return c; const s=String(c); return '20'+s.slice(0,2)+'/'+s.slice(2); }
 function fmtNum(v){ if(v==null||isNaN(v)) return '—'; const a=Math.abs(v); const dp = (a>0&&a<1)?3:2; return v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:dp}); }
 function assignColors(){ colorMap={}; cur().brokers.forEach((b,i)=>{ colorMap[b.name]=PALETTE[i%PALETTE.length]; }); }
@@ -240,14 +261,20 @@ async function init(){
   let loaded=false;
   try{ if(await loadFromSheet()){ loaded=true; SRC='Google 試算表'; } }catch(e){}
   if(!loaded){
-    try{ const res=await fetch('data.json',{cache:'no-store'}); if(res.ok){ const j=await res.json(); if(j&&j.inventory&&j.volume){ DATA=j; loaded=true; SRC='data.json'; } } }catch(e){}
+    try{ const res=await fetch('data.json',{cache:'no-store'}); if(res.ok){ const j=migrate(await res.json()); if(j&&(j.ELN||j.PGN)){ DATA=j; loaded=true; SRC='data.json'; } } }catch(e){}
   }
   if(!loaded){ load(); SRC='內建／本機暫存'; }
-  switchDataset('inventory', true);
+  state.product='ELN'; state.ds='inventory';
+  document.querySelectorAll('#productSeg button').forEach(b=>b.classList.toggle('on', b.dataset.pd==='ELN'));
+  document.querySelectorAll('#datasetSeg button').forEach(b=>b.classList.toggle('on', b.dataset.ds==='inventory'));
+  refreshSelection();
   const sn=document.getElementById('srcNote'); if(sn) sn.textContent='資料來源：'+SRC+'。';
 }
 
 function bindStaticUI(){
+  document.querySelectorAll('#productSeg button').forEach(btn=>{
+    btn.addEventListener('click',()=>switchProduct(btn.dataset.pd));
+  });
   document.querySelectorAll('#datasetSeg button').forEach(btn=>{
     btn.addEventListener('click',()=>switchDataset(btn.dataset.ds));
   });
@@ -262,16 +289,21 @@ function bindStaticUI(){
   document.getElementById('overlay').addEventListener('click',e=>{ if(e.target.id==='overlay') closeModal(); });
 }
 
+function switchProduct(pd, force){
+  if(state.product===pd && !force) return;
+  state.product=pd;
+  document.querySelectorAll('#productSeg button').forEach(b=>b.classList.toggle('on', b.dataset.pd===pd));
+  refreshSelection();
+}
 function switchDataset(ds, force){
   if(state.ds===ds && !force) return;
   state.ds=ds;
-  state.hidden=new Set();
   document.querySelectorAll('#datasetSeg button').forEach(b=>b.classList.toggle('on', b.dataset.ds===ds));
-  const empty = cur().brokers.length===0;
-  if(!empty){
-    state.month = cur().months[latestIdx()];
-    assignColors();
-  }
+  refreshSelection();
+}
+function refreshSelection(){
+  state.hidden=new Set();
+  if(cur().brokers.length>0){ state.month=cur().months[latestIdx()]; assignColors(); }
   renderAll();
 }
 
@@ -296,7 +328,7 @@ function renderKPIs(){
   const moverCls = mover.diff>0?'up':(mover.diff<0?'down':'flat');
   const moverSign = mover.diff>0?'▲':(mover.diff<0?'▼':'—');
   box.innerHTML=`
-    <div class="kpi"><div class="label">最新月份</div><div class="value num">${fmtMonth(latestMonth)}</div><div class="delta flat">目前顯示：${unit}</div></div>
+    <div class="kpi"><div class="label">最新月份</div><div class="value num">${fmtMonth(latestMonth)}</div><div class="delta flat">目前顯示：${state.product}・${unit}</div></div>
     <div class="kpi"><div class="label">市場總計</div><div class="value num">${fmtNum(total)}<small>億</small></div><div class="delta flat">${d.brokers.length} 家券商加總</div></div>
     <div class="kpi"><div class="label">本月龍頭</div><div class="value">${top.name}</div><div class="delta flat num">${fmtNum(top.val)} 億</div></div>
     <div class="kpi"><div class="label">最大月變動</div><div class="value">${mover.name}</div><div class="delta ${moverCls} num">${moverSign} ${fmtNum(Math.abs(mover.diff))} 億</div></div>`;
@@ -429,6 +461,7 @@ function renderTable(body){
 /* ---- import / export ---- */
 function openModal(){
   document.getElementById('overlay').classList.add('show');
+  document.querySelector('input[name="pdkind"][value="'+state.product+'"]').checked=true;
   document.querySelector('input[name="dskind"][value="'+state.ds+'"]').checked=true;
   document.getElementById('convYi').checked=true;
   document.getElementById('pasteArea').value='';
@@ -481,17 +514,22 @@ async function fetchSheet(url){
 }
 async function loadFromSheet(){
   const jobs=[];
-  if(SHEET_CONFIG.inventoryCsvUrl) jobs.push(fetchSheet(SHEET_CONFIG.inventoryCsvUrl).then(d=>['inventory',d]));
-  if(SHEET_CONFIG.volumeCsvUrl) jobs.push(fetchSheet(SHEET_CONFIG.volumeCsvUrl).then(d=>['volume',d]));
+  const products=SHEET_CONFIG.products||{};
+  Object.keys(products).forEach(pd=>{
+    const p=products[pd];
+    if(p.inventoryCsvUrl) jobs.push(fetchSheet(p.inventoryCsvUrl).then(d=>[pd,'inventory',d]));
+    if(p.volumeCsvUrl) jobs.push(fetchSheet(p.volumeCsvUrl).then(d=>[pd,'volume',d]));
+  });
   if(jobs.length===0) return false;
   const results=await Promise.allSettled(jobs);
   let any=false;
-  results.forEach(r=>{ if(r.status==='fulfilled'){ DATA[r.value[0]]=r.value[1]; any=true; } });
+  results.forEach(r=>{ if(r.status==='fulfilled'){ const [pd,k,d]=r.value; if(!DATA[pd])DATA[pd]=emptyProduct(); DATA[pd][k]=d; any=true; } });
   return any;
 }
 
 function applyImport(){
   const txt=document.getElementById('pasteArea').value;
+  const pd=document.querySelector('input[name="pdkind"]:checked').value;
   const kind=document.querySelector('input[name="dskind"]:checked').value;
   const msg=document.getElementById('parseMsg');
   try{
@@ -499,9 +537,16 @@ function applyImport(){
     if(document.getElementById('convYi').checked){
       parsed.brokers.forEach(b=>{ b.values=b.values.map(v=>v==null?null:v/K2YI); });
     }
-    DATA[kind]=parsed; save();
-    msg.className='parse-msg ok'; msg.textContent=`已匯入 ${parsed.brokers.length} 家券商、${parsed.months.length} 個月份。`;
-    setTimeout(()=>{ closeModal(); switchDataset(kind,true); },650);
+    if(!DATA[pd]) DATA[pd]=emptyProduct();
+    DATA[pd][kind]=parsed; save();
+    msg.className='parse-msg ok'; msg.textContent=`已匯入 ${pd}・${kind==='inventory'?'庫存':'交易量'}：${parsed.brokers.length} 家券商、${parsed.months.length} 個月份。`;
+    setTimeout(()=>{
+      closeModal();
+      state.product=pd; state.ds=kind;
+      document.querySelectorAll('#productSeg button').forEach(b=>b.classList.toggle('on', b.dataset.pd===pd));
+      document.querySelectorAll('#datasetSeg button').forEach(b=>b.classList.toggle('on', b.dataset.ds===kind));
+      refreshSelection();
+    },650);
   }catch(e){ msg.className='parse-msg err'; msg.textContent='解析失敗：'+e.message; }
 }
 
@@ -511,12 +556,13 @@ function exportCSV(){
   d.brokers.forEach(b=>{ rows.push(b.name+','+b.values.map(v=>v==null?'':v).join(',')); });
   const blob=new Blob(['\ufeff'+rows.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download=(state.ds==='inventory'?'庫存':'交易量')+'_'+fmtMonth(d.months[latestIdx()]).replace('/','')+'.csv';
+  a.download=state.product+'_'+(state.ds==='inventory'?'庫存':'交易量')+'_'+fmtMonth(d.months[latestIdx()]).replace('/','')+'.csv';
   a.click(); URL.revokeObjectURL(a.href);
 }
 
 function exportJSON(){
-  if(DATA.inventory.brokers.length===0 && DATA.volume.brokers.length===0){ alert('目前沒有資料可匯出'); return; }
+  const has=Object.keys(DATA).some(pd=>DATA[pd].inventory.brokers.length||DATA[pd].volume.brokers.length);
+  if(!has){ alert('目前沒有資料可匯出'); return; }
   const blob=new Blob([JSON.stringify(DATA,null,1)],{type:'application/json;charset=utf-8'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='data.json'; a.click(); URL.revokeObjectURL(a.href);
 }
