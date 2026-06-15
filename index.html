@@ -248,6 +248,7 @@ function load(){
   }catch(e){}
 }
 function save(){ try{ localStorage.setItem(STORE_KEY, JSON.stringify(DATA)); }catch(e){} }
+function normalizeAll(){ Object.keys(DATA).forEach(pd=>{ ['inventory','volume'].forEach(k=>{ if(DATA[pd]&&DATA[pd][k]&&DATA[pd][k].months) DATA[pd][k]=trimEmptyMonths(DATA[pd][k]); }); }); }
 function cur(){ return (DATA[state.product]||emptyProduct())[state.ds]; }
 function fmtMonth(c){ if(!c) return c; const s=String(c); return '20'+s.slice(0,2)+'/'+s.slice(2); }
 function fmtNum(v){ if(v==null||isNaN(v)) return '—'; const a=Math.abs(v); const dp = (a>0&&a<1)?3:2; return v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:dp}); }
@@ -264,6 +265,7 @@ async function init(){
     try{ const res=await fetch('data.json',{cache:'no-store'}); if(res.ok){ const j=migrate(await res.json()); if(j&&(j.ELN||j.PGN)){ DATA=j; loaded=true; SRC='data.json'; } } }catch(e){}
   }
   if(!loaded){ load(); SRC='內建／本機暫存'; }
+  normalizeAll();
   state.product='ELN'; state.ds='inventory';
   document.querySelectorAll('#productSeg button').forEach(b=>b.classList.toggle('on', b.dataset.pd==='ELN'));
   document.querySelectorAll('#datasetSeg button').forEach(b=>b.classList.toggle('on', b.dataset.ds==='inventory'));
@@ -486,6 +488,15 @@ function parseDelimited(text, delim){
   if(cell!==''||row.length){ row.push(cell); rows.push(row); }
   return rows.filter(r=>r.some(x=>(x||'').trim()!==''));
 }
+function trimEmptyMonths(ds){
+  const n=ds.months.length;
+  const hasData=i=>ds.brokers.some(b=>b.values[i]!=null);
+  let start=0; while(start<n && !hasData(start)) start++;
+  let end=n-1; while(end>=start && !hasData(end)) end--;
+  if(start===0 && end===n-1) return ds;
+  if(start>end) return {months:[], brokers:ds.brokers.map(b=>({name:b.name,values:[]}))};
+  return { months:ds.months.slice(start,end+1), brokers:ds.brokers.map(b=>({name:b.name,values:b.values.slice(start,end+1)})) };
+}
 function rowsToDataset(rows){
   if(rows.length<2) throw new Error('至少需要標題列加一列資料');
   const header=rows[0].map(s=>(s||'').trim());
@@ -500,7 +511,7 @@ function rowsToDataset(rows){
     brokers.push({name,values});
   }
   if(brokers.length===0) throw new Error('找不到任何券商資料列');
-  return {months,brokers};
+  return trimEmptyMonths({months,brokers});
 }
 function parseTable(text){ const delim = text.indexOf('\t')>=0?'\t':','; return rowsToDataset(parseDelimited(text, delim)); }
 
